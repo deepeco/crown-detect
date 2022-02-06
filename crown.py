@@ -147,10 +147,6 @@ def train(model):
     dataset_val.load_crown()
     dataset_val.prepare()
 
-    # *** This training schedule is an example. Update to your needs ***
-    # Since we're using a very small dataset, and starting from
-    # COCO trained weights, we don't need to train too long. Also,
-    # no need to train all layers, just the heads should do it.
     print("Training network heads")
     model.get_imagenet_weights()
     model.train(dataset_train, dataset_val,
