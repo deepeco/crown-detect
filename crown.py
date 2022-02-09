@@ -21,14 +21,16 @@ Usage: import the module (see Jupyter notebooks for examples), or run from
 """
 
 import os
-import json
-import datetime
+# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"   # only for inference
+
 import numpy as np
 import skimage.draw
 from skimage.measure import label
 import glob
 import tensorflow as tf
 import matplotlib.pyplot as plt
+import imgaug as ia
+import imgaug.augmenters as iaa
 
 gpus = tf.config.experimental.list_physical_devices('GPU')
 if gpus:
@@ -117,8 +119,8 @@ class CrownsDataset(utils.Dataset):
         masks = mask_converter(mask)
         result_masks = []
         result_cl_ids = []
-        for cl_id in range(1, CrownsConfig.NUM_CLASSES-1):
-            labels = label(masks[..., cl_id], background=0)
+        for cl_id in range(1, CrownsConfig.NUM_CLASSES):
+            labels = label(masks[..., cl_id-1], background=0)
             for lab in np.unique(labels):
                 if lab > 0:
                     result_masks.append((labels == lab).astype(np.uint8))
@@ -152,7 +154,18 @@ def train(model):
     model.train(dataset_train, dataset_val,
                 learning_rate=config.LEARNING_RATE,
                 epochs=200,
-                layers='heads')
+                layers='heads',
+                augmentation=iaa.Sequential([
+                    iaa.Fliplr(1),
+                    iaa.Flipud(1),
+                    iaa.Affine(rotate=(-45, 45)),
+                    iaa.Affine(rotate=(-90, 90)),
+                    iaa.Affine(scale=(0.5, 1.5)),
+                    iaa.Dropout([0.05, 0.1, 0.3]),
+                    iaa.Sharpen((0.0, 1.0)),
+                    iaa.ElasticTransformation(alpha=20, sigma=3)
+                ])
+    )
 
 
 
@@ -170,7 +183,7 @@ def train(model):
 ############################################################
 
 if __name__ == '__main__':
-    MODE = "training"  # inference
+    MODE = "training"  # training
 
     # Configurations
     if MODE == "training":
@@ -188,22 +201,31 @@ if __name__ == '__main__':
 
     model = modellib.MaskRCNN(mode=MODE, config=config,
                               model_dir=DEFAULT_LOGS_DIR)
-    train(model)
+    if MODE == 'training':
+        train(model)
 
 
     if MODE == 'inference':
         model = modellib.MaskRCNN(mode=MODE, config=config,
                                     model_dir=DEFAULT_LOGS_DIR)
 
-        model.load_weights("mask_rcnn_crowns_0100.h5", by_name=True)
+        model.load_weights("mask_rcnn_crowns_0184.h5", by_name=True)
 
-        image = skimage.io.imread("./data/images/0.png")[...,:3]
-        # Detect objects
-        r = model.detect([image], verbose=1)[0]
+        for im_name in glob.glob("./apply/*.png"):
+            print(f"image name: {im_name}")
+            fname = os.path.basename(im_name)
+            image = skimage.io.imread(im_name)[...,:3]
+            # Detect objects
+            r = model.detect([image], verbose=1)[0]
+            for col, cls in zip(['tab:red', 'tab:blue', 'tab:black', 'tab:pink'], [1, 2, 3, 4]):
+                print(f"Num of objects on {fname}-cls-{cls}: {sum(r['class_ids']==cls)}.")
+                mask = (np.sum(r['masks'][...,r['class_ids']==cls], -1, keepdims=True) >= 0.1)
+                # plt.imshow(mask.astype(np.uint8)*255)
+                # plt.gcf().savefig(f"cls-{fname}-{cls}.png", dpi=300)
+                # plt.close('all')
         # Color splash
-        mask = (np.sum(r['masks'], -1, keepdims=True) >= 1)
-        plt.imshow(mask.astype(np.uint8)*255)
-        print(r['masks'].shape)
-        plt.show()
+
+
+
 
     #
