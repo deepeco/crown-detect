@@ -21,11 +21,12 @@ Usage: import the module (see Jupyter notebooks for examples), or run from
 """
 
 import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"   # only for inference
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"   # only for inference
 
 import numpy as np
 import skimage.draw
 from skimage.measure import label
+from skimage.io import imsave
 import glob
 import tensorflow as tf
 import matplotlib.pyplot as plt
@@ -49,7 +50,7 @@ DEFAULT_LOGS_DIR = "logs"
 
 
 def mask_converter(mask):
-    COL_THRESHOLD = 50
+    COL_THRESHOLD = 80
     COLOR_MAP = {
         'RED': np.array((250, 0, 0, 255)),
         'BLUE': np.array((0, 0, 250, 255)),
@@ -63,7 +64,7 @@ def mask_converter(mask):
     cl4 = (np.sqrt(((mask - COLOR_MAP.get("PINK"))**2).sum(axis=-1)) < COL_THRESHOLD).astype(bool)
     cl5 = (np.sqrt(((mask - COLOR_MAP.get("WHITE"))**2).sum(axis=-1)) < COL_THRESHOLD).astype(bool)
     output = np.dstack([cl1, cl2, cl3, cl4])
-    # output = (rgb2gray(invert(mask)) / 255.0 > 0).astype(np.float32)
+    #output = (rgb2gray(invert(mask)) / 255.0 > 0).astype(np.float32)
     return output
 
 class CrownsConfig(Config):
@@ -74,16 +75,24 @@ class CrownsConfig(Config):
     NUM_CLASSES = 1 + 4  # Background + # of crown types
 
     # Number of training steps per epoch
-    STEPS_PER_EPOCH = 4
+    STEPS_PER_EPOCH = 2
 
     MAX_GT_INSTANCES = 500
 
-    VALIDATION_STEPS = 2
+    VALIDATION_STEPS = 1
+
+    # RPN_NMS_THRESHOLD = 0.7
+    # POST_NMS_ROIS_INFERENCE=100000
 
     # Skip detections with < 90% confidence
-    DETECTION_MIN_CONFIDENCE = 0.2
+    DETECTION_MIN_CONFIDENCE = 0.3
 
     DETECTION_MAX_INSTANCES = 500
+
+    # Non-maximum suppression threshold for detection
+    DETECTION_NMS_THRESHOLD = 0.7
+    
+    BACKBONE = "resnet101"
 
 
 class CrownsDataset(utils.Dataset):
@@ -153,17 +162,17 @@ def train(model):
     model.get_imagenet_weights()
     model.train(dataset_train, dataset_val,
                 learning_rate=config.LEARNING_RATE,
-                epochs=200,
+                epochs=10,
                 layers='heads',
-                augmentation=iaa.Sequential([
+                augmentation=iaa.OneOf([
                     iaa.Fliplr(1),
                     iaa.Flipud(1),
                     iaa.Affine(rotate=(-45, 45)),
                     iaa.Affine(rotate=(-90, 90)),
                     iaa.Affine(scale=(0.5, 1.5)),
-                    iaa.Dropout([0.05, 0.1, 0.3]),
-                    iaa.Sharpen((0.0, 1.0)),
-                    iaa.ElasticTransformation(alpha=20, sigma=3)
+                    iaa.Dropout([0.05, 0.1, 0.2]),
+                    #iaa.Sharpen((0.0, 1.0)),
+                    #iaa.ElasticTransformation(alpha=20, sigma=3)
                 ])
     )
 
@@ -183,7 +192,7 @@ def train(model):
 ############################################################
 
 if __name__ == '__main__':
-    MODE = "training"  # training
+    MODE = "inference"  # training inference
 
     # Configurations
     if MODE == "training":
@@ -209,7 +218,7 @@ if __name__ == '__main__':
         model = modellib.MaskRCNN(mode=MODE, config=config,
                                     model_dir=DEFAULT_LOGS_DIR)
 
-        model.load_weights("mask_rcnn_crowns_0184.h5", by_name=True)
+        model.load_weights("mask_rcnn_crowns_0007.h5", by_name=True)
 
         for im_name in glob.glob("./apply/*.png"):
             print(f"image name: {im_name}")
@@ -219,9 +228,10 @@ if __name__ == '__main__':
             r = model.detect([image], verbose=1)[0]
             for col, cls in zip(['tab:red', 'tab:blue', 'tab:black', 'tab:pink'], [1, 2, 3, 4]):
                 print(f"Num of objects on {fname}-cls-{cls}: {sum(r['class_ids']==cls)}.")
-                mask = (np.sum(r['masks'][...,r['class_ids']==cls], -1, keepdims=True) >= 0.1)
-                # plt.imshow(mask.astype(np.uint8)*255)
-                # plt.gcf().savefig(f"cls-{fname}-{cls}.png", dpi=300)
+                mask = (np.sum(r['masks'][...,r['class_ids']==cls].astype(int), -1, keepdims=True) > 0.0)
+                imsave(f"{fname}-cls-{cls}.png", mask.astype(np.uint8)*255)
+                # plt.imshow()
+                # plt.gcf().savefig(, dpi=300)
                 # plt.close('all')
         # Color splash
 
