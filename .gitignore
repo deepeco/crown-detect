@@ -7,3 +7,4 @@ logs
 *.h5
 *.png
 *.rar
+.ipynb_checkpoints
